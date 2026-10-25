@@ -48,8 +48,12 @@
 Ссылка на плагин:
 
 ```
-https://cdn.jsdelivr.net/gh/oleg-omel/lampa-evening-movie@main/evening.js
+https://oleg-omel.github.io/lampa-evening-movie/evening.js
 ```
+
+Это GitHub Pages: новая версия появляется по ссылке через пару минут после публикации.
+Старая ссылка `https://cdn.jsdelivr.net/gh/oleg-omel/lampa-evening-movie@main/evening.js` тоже
+работает, но jsDelivr может отдавать прошлую версию до 12 часов, а телевизор — хранить её до 7 дней.
 
 В Lampa: **Настройки → Расширения → Добавить плагин**, вставьте ссылку и перезапустите Lampa.
 
