@@ -830,9 +830,11 @@
 
         var card = $.extend({}, entry.movie, d, { source: 'tmdb' });
         var videos = trailers(d);
-        var trailerButton = !videos.length ? [] : [{
-            name: videos[0].iso_639_1 === lang() ? 'Трейлер' : 'Трейлер EN',
+        // Кнопка есть всегда, чтобы номера кнопок на пульте не сдвигались
+        var trailerButton = [{
+            name: !videos.length || videos[0].iso_639_1 === lang() ? 'Трейлер' : 'Трейлер EN',
             onSelect: function () {
+                if (!videos.length) return Lampa.Noty.show('Трейлер не найден');
                 playTrailer(videos, function () { show(entry, mode); });
             }
         }];
