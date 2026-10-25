@@ -831,7 +831,7 @@
         var card = $.extend({}, entry.movie, d, { source: 'tmdb' });
         var videos = trailers(d);
         var trailerButton = !videos.length ? [] : [{
-            name: videos[0].iso_639_1 === lang() ? 'Трейлер' : 'Трейлер (англ.)',
+            name: videos[0].iso_639_1 === lang() ? 'Трейлер' : 'Трейлер EN',
             onSelect: function () {
                 playTrailer(videos, function () { show(entry, mode); });
             }
