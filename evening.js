@@ -880,6 +880,8 @@
                 }
             ])
         });
+
+        $('.modal').last().addClass('evening-modal');
     }
 
     // YouTube-трейлеры: сначала на языке интерфейса, потом английские; трейлеры раньше тизеров
@@ -1027,6 +1029,8 @@
             '.evening-movie__reason{display:inline-block;margin-top:.8em;padding:.25em .7em;border-radius:1em;background:rgba(255,255,255,.12);font-size:.9em}' +
             '.evening-movie__overview{margin-top:1em;line-height:1.5;opacity:.9}' +
             '.evening-rate svg{width:1.6em;height:1.6em}' +
+            '.evening-modal .modal__footer{flex-wrap:wrap;row-gap:.6em}' +
+            '.evening-modal .modal__button{white-space:nowrap;padding-left:.9em;padding-right:.9em}' +
             '@media (max-width:600px){.evening-movie{flex-direction:column}.evening-movie__poster{flex-basis:auto;width:9em}}' +
             '</style>');
     }
