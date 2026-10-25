@@ -254,14 +254,82 @@
         return false;
     }
 
-    function passesFilters(movie, p) {
+    // ---------- режимы и фильтры ----------
+
+    var MOODS = [
+        { id: 'laugh', title: 'Посмеяться', genres: [35], without: [27, 53, 10752] },
+        { id: 'cozy', title: 'Уютно и спокойно', genres: [35, 10749, 10751], without: [27, 53, 80, 10752] },
+        { id: 'romance', title: 'Романтика', genres: [10749], without: [27] },
+        { id: 'drive', title: 'Драйв и экшен', genres: [28, 12], without: [] },
+        { id: 'thrill', title: 'Пощекотать нервы', genres: [53, 27, 9648], without: [35, 10751] },
+        { id: 'crime', title: 'Детектив и криминал', genres: [80, 9648], without: [10751] },
+        { id: 'think', title: 'Подумать', genres: [18, 9648, 878], without: [35, 10751, 28], min_rating: 7.5 },
+        { id: 'touch', title: 'Что-то трогательное', genres: [18, 10749], without: [27, 28, 53] },
+        { id: 'worlds', title: 'Другие миры', genres: [878, 14], without: [] },
+        { id: 'history', title: 'История и война', genres: [36, 10752], without: [] }
+    ];
+
+    var GENRES = [
+        [28, 'Боевик'], [12, 'Приключения'], [35, 'Комедия'], [18, 'Драма'], [80, 'Криминал'],
+        [9648, 'Детектив'], [53, 'Триллер'], [27, 'Ужасы'], [878, 'Фантастика'], [14, 'Фэнтези'],
+        [10749, 'Мелодрама'], [10751, 'Семейный'], [36, 'История'], [10752, 'Военный'],
+        [37, 'Вестерн'], [10402, 'Музыка'], [16, 'Мультфильм'], [99, 'Документальный']
+    ];
+
+    var DECADES = [1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020];
+
+    function findMood(id) {
+        return MOODS.filter(function (m) { return m.id === id; })[0];
+    }
+
+    function genreName(id) {
+        var g = GENRES.filter(function (g) { return g[0] == id; })[0];
+        return g ? g[1] : '';
+    }
+
+    function decadeName(year) {
+        return year >= 2000 ? year + '-е' : String(year).slice(2) + '-е';
+    }
+
+    function describeFilter(f) {
+        var parts = [];
+        if (f.mood && findMood(f.mood)) parts.push(findMood(f.mood).title);
+        if (f.genre) parts.push(genreName(f.genre));
+        if (f.decade) parts.push(decadeName(f.decade));
+        return parts.join(', ');
+    }
+
+    // Режим -> конкретные ограничения поиска
+    function criteria(mode, p) {
+        var f = mode.type === 'custom' ? mode.filter : {};
+        var mood = findMood(f.mood);
+        var genre = f.genre ? parseInt(f.genre, 10) : 0;
+        var exclude = p.exclude_genres ? EXCLUDED_GENRES.slice() : [];
+        var without = (mood ? mood.without : []).concat(exclude).filter(function (g) { return g !== genre; });
+
+        return {
+            from: f.decade ? Math.max(f.decade, 1900) : p.min_year,
+            to: f.decade ? f.decade + 9 : 0,
+            genre: genre,                          // обязательный жанр
+            any: mood && !genre ? mood.genres : [], // хотя бы один из жанров настроения
+            boost: mood ? mood.genres : [],         // жанры настроения поднимают в рейтинге
+            without: without,
+            min_rating: Math.max(p.min_rating, (mood && mood.min_rating) || 0)
+        };
+    }
+
+    function passesFilters(movie, p, c) {
         if (!movie || !movie.id || movie.adult || movie.video) return false;
         if (!movie.poster_path || !movie.release_date) return false;
-        if ((movie.vote_average || 0) < p.min_rating) return false;
+        if ((movie.vote_average || 0) < c.min_rating) return false;
         if ((movie.vote_count || 0) < p.min_votes) return false;
-        if (parseInt(movie.release_date.slice(0, 4), 10) < p.min_year) return false;
+        var year = parseInt(movie.release_date.slice(0, 4), 10);
+        if (year < c.from || (c.to && year > c.to)) return false;
         if (movie.release_date > dateShift(0)) return false;
-        if (p.exclude_genres && genreIds(movie).some(function (g) { return EXCLUDED_GENRES.indexOf(g) >= 0; })) return false;
+        var genres = genreIds(movie);
+        if (c.genre && genres.indexOf(c.genre) < 0) return false;
+        if (c.any.length && !genres.some(function (g) { return c.any.indexOf(g) >= 0; })) return false;
+        if (genres.some(function (g) { return c.without.indexOf(g) >= 0; })) return false;
         return true;
     }
 
@@ -283,74 +351,113 @@
     }
 
     function dislikedGenres(weights) {
-        return Object.keys(weights).filter(function (g) { return weights[g] <= -4; });
+        return Object.keys(weights).filter(function (g) { return weights[g] <= -4; }).map(Number);
     }
 
-    function discoverParams(p, extra) {
+    function discoverParams(p, c, extra) {
         var params = {
             sort_by: 'vote_count.desc',
-            'vote_average.gte': p.min_rating,
+            'vote_average.gte': c.min_rating,
             'vote_count.gte': p.min_votes,
-            'primary_release_date.gte': p.min_year + '-01-01',
-            'primary_release_date.lte': dateShift(DIGITAL_DELAY_DAYS),
+            'primary_release_date.gte': c.from + '-01-01',
+            'primary_release_date.lte': c.to && c.to < new Date().getFullYear() ? c.to + '-12-31' : dateShift(DIGITAL_DELAY_DAYS),
             with_release_type: '4|5', // есть цифровой или физический релиз
             include_adult: 'false',
             page: 1
         };
-        var without = p.exclude_genres ? EXCLUDED_GENRES.slice() : [];
-        if (extra.without) without = without.concat(extra.without);
+        if (c.genre) params.with_genres = String(c.genre);
+        else if (c.any.length) params.with_genres = c.any.join('|');
+        var without = c.without.concat(extra.without || []).filter(function (g) { return g !== c.genre && c.any.indexOf(g) < 0; });
         if (without.length) params.without_genres = without.join(',');
         for (var k in extra) if (k !== 'without') params[k] = extra[k];
         return params;
     }
 
-    function collect(profile, p, done) {
-        var jobs = [];
-        var pool = {};
-        var bad = dislikedGenres(profile.weights);
+    // Запрашивает несколько случайных страниц выдачи discover
+    function discoverRandom(params, pages, done) {
+        request(tmdbUrl('discover/movie', params), function (json) {
+            var first = (json && json.results) || [];
+            var total = Math.min((json && json.total_pages) || 1, 500);
+            if (total <= 1) return done(first);
 
-        // 1. рекомендации к понравившимся фильмам
-        shuffle(profile.liked.slice()).slice(0, 3).forEach(function (seed) {
-            jobs.push({
-                url: tmdbUrl('movie/' + seed.id + '/recommendations', { page: 1 }),
-                source: { type: 'similar', title: seed.title }
-            });
-        });
+            var numbers = [];
+            for (var i = 1; i <= total; i++) numbers.push(i);
+            numbers = shuffle(numbers).slice(0, pages);
 
-        // 2. любимые жанры
-        var fav = topGenres(profile.weights, 3);
-        if (fav.length) {
-            jobs.push({
-                url: tmdbUrl('discover/movie', discoverParams(p, { with_genres: fav.join('|'), without: bad, page: 1 + Math.floor(Math.random() * 5) })),
-                source: { type: 'genres' }
-            });
-        }
-
-        // 3. просто хорошие фильмы — для разнообразия и для «холодного старта»
-        jobs.push({
-            url: tmdbUrl('discover/movie', discoverParams(p, { without: bad, page: 1 + Math.floor(Math.random() * 10) })),
-            source: { type: 'top' }
-        });
-        jobs.push({
-            url: tmdbUrl('discover/movie', discoverParams(p, { sort_by: 'popularity.desc', without: bad, page: 1 + Math.floor(Math.random() * 5) })),
-            source: { type: 'top' }
-        });
-
-        var left = jobs.length;
-
-        jobs.forEach(function (job) {
-            request(job.url, function (json) {
-                ((json && json.results) || []).forEach(function (movie) {
-                    if (!passesFilters(movie, p) || excluded(movie, profile)) return;
-                    var entry = pool[movie.id] || (pool[movie.id] = { movie: movie, sources: [] });
-                    entry.sources.push(job.source);
+            var all = [];
+            var left = numbers.length;
+            numbers.forEach(function (page) {
+                if (page === 1) {
+                    all = all.concat(first);
+                    if (--left === 0) done(all);
+                    return;
+                }
+                request(tmdbUrl('discover/movie', $.extend({}, params, { page: page })), function (res) {
+                    all = all.concat((res && res.results) || []);
+                    if (--left === 0) done(all.length ? all : first);
                 });
-                if (--left === 0) done(rank(pool, profile));
             });
         });
     }
 
-    function rank(pool, profile) {
+    function collect(profile, p, mode, c, done) {
+        var jobs = [];
+        var pool = {};
+        var bad = mode.type === 'random' ? [] : dislikedGenres(profile.weights);
+
+        function add(results, source) {
+            results.forEach(function (movie) {
+                if (!passesFilters(movie, p, c) || excluded(movie, profile)) return;
+                var entry = pool[movie.id] || (pool[movie.id] = { movie: movie, sources: [] });
+                entry.sources.push(source);
+            });
+        }
+
+        function listJob(url, source) {
+            jobs.push(function (next) {
+                request(url, function (json) { add((json && json.results) || [], source); next(); });
+            });
+        }
+
+        function randomJob(params, pages, source) {
+            jobs.push(function (next) {
+                discoverRandom(params, pages, function (results) { add(results, source); next(); });
+            });
+        }
+
+        if (mode.type === 'random') {
+            var sorts = ['vote_count.desc', 'popularity.desc', 'vote_average.desc', 'revenue.desc'];
+            randomJob(discoverParams(p, c, { sort_by: sorts[Math.floor(Math.random() * sorts.length)] }), 2, { type: 'random' });
+            randomJob(discoverParams(p, c, { sort_by: 'primary_release_date.desc' }), 1, { type: 'random' });
+        } else {
+            // рекомендации к понравившимся фильмам (в режиме фильтров тоже, но отсеются по фильтру)
+            shuffle(profile.liked.slice()).slice(0, mode.type === 'custom' ? 4 : 3).forEach(function (seed) {
+                listJob(tmdbUrl('movie/' + seed.id + '/recommendations', { page: 1 }), { type: 'similar', title: seed.title });
+            });
+
+            if (mode.type === 'custom') {
+                randomJob(discoverParams(p, c, { without: bad }), 2, { type: 'filter' });
+                randomJob(discoverParams(p, c, { sort_by: 'popularity.desc', without: bad }), 1, { type: 'filter' });
+            } else {
+                var fav = topGenres(profile.weights, 3);
+                if (fav.length) {
+                    listJob(tmdbUrl('discover/movie', discoverParams(p, c, { with_genres: fav.join('|'), without: bad, page: 1 + Math.floor(Math.random() * 5) })), { type: 'genres' });
+                }
+                // просто хорошие фильмы — для разнообразия и для «холодного старта»
+                listJob(tmdbUrl('discover/movie', discoverParams(p, c, { without: bad, page: 1 + Math.floor(Math.random() * 10) })), { type: 'top' });
+                listJob(tmdbUrl('discover/movie', discoverParams(p, c, { sort_by: 'popularity.desc', without: bad, page: 1 + Math.floor(Math.random() * 5) })), { type: 'top' });
+            }
+        }
+
+        var left = jobs.length;
+        jobs.forEach(function (job) {
+            job(function () {
+                if (--left === 0) done(rank(pool, profile, mode, c));
+            });
+        });
+    }
+
+    function rank(pool, profile, mode, c) {
         var weights = profile.weights;
         var total = 0;
         Object.keys(weights).forEach(function (g) { total += Math.abs(weights[g]); });
@@ -358,18 +465,26 @@
         return Object.keys(pool).map(function (id) {
             var entry = pool[id];
             var movie = entry.movie;
-            var affinity = 0;
 
+            if (mode.type === 'random') {
+                entry.score = Math.random();
+                entry.reason = 'Случайный выбор';
+                return entry;
+            }
+
+            var affinity = 0;
             genreIds(movie).forEach(function (g) { affinity += weights[g] || 0; });
             if (total) affinity = Math.max(-3, Math.min(3, affinity / Math.sqrt(total)));
 
+            var mood = genreIds(movie).filter(function (g) { return c.boost.indexOf(g) >= 0; }).length;
             var similar = entry.sources.filter(function (s) { return s.type === 'similar'; });
 
             entry.score = movie.vote_average
                 + affinity
                 + (similar.length ? 1 + similar.length * 0.5 : 0)
+                + mood * 0.5
                 + Math.log(movie.vote_count) / Math.LN10 * 0.3
-                + Math.random() * 1.5;
+                + Math.random() * (mode.type === 'custom' ? 2.5 : 1.5);
             entry.reason = similar.length ? 'Похоже на «' + similar[0].title + '»' :
                 affinity > 0.5 ? 'В ваших любимых жанрах' : 'Высокий рейтинг';
             return entry;
@@ -426,15 +541,98 @@
     // ---------- главное окно ----------
 
     var busy = false;
+    var FILTER_KEY = 'evening_movie_filter';
 
-    function pick() {
+    function savedFilter() {
+        var f = Lampa.Storage.get(FILTER_KEY, '{}');
+        return f && typeof f === 'object' ? f : {};
+    }
+
+    // Первый экран: выбор режима
+    function openModes() {
         if (busy) return;
 
         var data = db();
         if (data.pending && Date.now() - data.pending.time > 60 * 60 * 1000) {
-            return askPending(data.pending, pick);
+            return askPending(data.pending, openModes);
         }
 
+        var filter = describeFilter(savedFilter());
+
+        Lampa.Select.show({
+            title: 'Фильм на вечер',
+            items: [
+                { title: 'По моему вкусу', subtitle: 'С учётом ваших оценок', mode: { type: 'taste' } },
+                { title: 'Случайный фильм', subtitle: 'Любой хороший фильм, без учёта вкуса', mode: { type: 'random' } },
+                { title: 'Настроение, жанр, десятилетие', subtitle: filter ? 'В прошлый раз: ' + filter : 'Указать, чего хочется', filters: true }
+            ],
+            onSelect: function (item) {
+                if (item.filters) openFilters(savedFilter());
+                else {
+                    Lampa.Controller.toggle('content');
+                    pick(item.mode);
+                }
+            },
+            onBack: function () { Lampa.Controller.toggle('content'); }
+        });
+    }
+
+    function chooseOption(title, items, current, done, back) {
+        items.forEach(function (i) { i.selected = String(i.value || '') === String(current || ''); });
+        Lampa.Select.show({
+            title: title,
+            items: items,
+            onSelect: function (item) { done(item.value || ''); },
+            onBack: back
+        });
+    }
+
+    // Экран фильтров: каждое поле открывает свой список, «Подобрать» запускает поиск
+    function openFilters(f) {
+        var mood = findMood(f.mood);
+        var reopen = function () { openFilters(f); };
+
+        function set(key) {
+            return function (value) {
+                f[key] = value;
+                Lampa.Storage.set(FILTER_KEY, f);
+                openFilters(f);
+            };
+        }
+
+        var items = [
+            { title: 'Настроение', subtitle: mood ? mood.title : 'Любое', action: 'mood' },
+            { title: 'Жанр', subtitle: f.genre ? genreName(f.genre) : 'Любой', action: 'genre' },
+            { title: 'Десятилетие', subtitle: f.decade ? decadeName(f.decade) : 'Любое', action: 'decade' }
+        ];
+        if (describeFilter(f)) items.push({ title: 'Сбросить фильтры', action: 'reset' });
+        items.push({ title: 'Подобрать фильм', subtitle: describeFilter(f) || 'Без ограничений', action: 'go' });
+
+        Lampa.Select.show({
+            title: 'Чего хочется?',
+            items: items,
+            onSelect: function (item) {
+                if (item.action === 'mood') {
+                    chooseOption('Настроение', [{ title: 'Любое' }].concat(MOODS.map(function (m) { return { title: m.title, value: m.id }; })), f.mood, set('mood'), reopen);
+                } else if (item.action === 'genre') {
+                    chooseOption('Жанр', [{ title: 'Любой' }].concat(GENRES.map(function (g) { return { title: g[1], value: g[0] }; })), f.genre, set('genre'), reopen);
+                } else if (item.action === 'decade') {
+                    chooseOption('Десятилетие', [{ title: 'Любое' }].concat(DECADES.map(function (d) { return { title: decadeName(d), value: d }; }).reverse()), f.decade, set('decade'), reopen);
+                } else if (item.action === 'reset') {
+                    f = {};
+                    Lampa.Storage.set(FILTER_KEY, f);
+                    openFilters(f);
+                } else {
+                    Lampa.Controller.toggle('content');
+                    pick({ type: 'custom', filter: f });
+                }
+            },
+            onBack: openModes
+        });
+    }
+
+    function pick(mode) {
+        if (busy) return;
         busy = true;
         Lampa.Loading.start(function () {
             busy = false;
@@ -445,16 +643,21 @@
         var p = prefs();
         var profile = buildProfile();
 
-        collect(profile, p, function (candidates) {
+        collect(profile, p, mode, criteria(mode, p), function (candidates) {
             verify(candidates, p, function (entry) {
                 if (!busy) return;
                 busy = false;
                 Lampa.Loading.stop();
                 if (!entry) {
-                    Lampa.Noty.show('Не нашлось подходящих фильмов. Попробуйте снизить порог рейтинга в настройках.');
+                    if (mode.type === 'custom') {
+                        Lampa.Noty.show('Под эти условия ничего не нашлось — попробуйте ослабить фильтры');
+                        openFilters(mode.filter);
+                    } else {
+                        Lampa.Noty.show('Не нашлось подходящих фильмов. Попробуйте снизить порог рейтинга в настройках.');
+                    }
                     return;
                 }
-                show(entry);
+                show(entry, mode);
             });
         });
     }
@@ -480,7 +683,9 @@
         });
     }
 
-    function show(entry) {
+    var MODE_TITLE = { taste: 'По вашему вкусу', random: 'Случайный фильм' };
+
+    function show(entry, mode) {
         var d = entry.details;
         var year = (d.release_date || '').slice(0, 4);
         var runtime = d.runtime ? Math.floor(d.runtime / 60) + ' ч ' + (d.runtime % 60) + ' мин' : '';
@@ -507,7 +712,7 @@
         var card = $.extend({}, entry.movie, d, { source: 'tmdb' });
 
         Lampa.Modal.open({
-            title: 'Фильм на вечер',
+            title: 'Фильм на вечер · ' + (mode.type === 'custom' ? describeFilter(mode.filter) || 'Без фильтров' : MODE_TITLE[mode.type]),
             html: html,
             size: 'medium',
             buttons_position: 'outside',
@@ -528,14 +733,14 @@
                     onSelect: function () {
                         skip(card);
                         Lampa.Modal.close();
-                        pick();
+                        pick(mode);
                     }
                 },
                 {
                     name: 'Уже смотрел',
                     onSelect: function () {
                         Lampa.Modal.close();
-                        rate(card, function () { pick(); }, closeModal);
+                        rate(card, function () { pick(mode); }, closeModal);
                     }
                 },
                 {
@@ -543,7 +748,7 @@
                     onSelect: function () {
                         setStatus(card, 'disliked');
                         Lampa.Modal.close();
-                        pick();
+                        pick(mode);
                     }
                 }
             ]
@@ -649,7 +854,7 @@
                 '<div class="menu__text">Фильм на вечер</div>' +
             '</li>'
         );
-        item.on('hover:enter', pick);
+        item.on('hover:enter', openModes);
         $('.menu .menu__list').eq(0).append(item);
     }
 
