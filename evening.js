@@ -646,7 +646,7 @@
         if (index >= candidates.length || index >= 8) return done(null);
 
         var entry = candidates[index];
-        request(tmdbUrl('movie/' + entry.movie.id, { append_to_response: 'release_dates' }), function (details) {
+        request(tmdbUrl('movie/' + entry.movie.id, { append_to_response: 'release_dates,videos', include_video_language: lang() + ',en' }), function (details) {
             if (!details || !details.id || !hasDigitalRelease(details)) return verify(candidates, p, done, index + 1);
             entry.details = details;
             if (!p.jacred) return done(entry);
@@ -829,6 +829,13 @@
         );
 
         var card = $.extend({}, entry.movie, d, { source: 'tmdb' });
+        var videos = trailers(d);
+        var trailerButton = !videos.length ? [] : [{
+            name: videos[0].iso_639_1 === lang() ? 'Трейлер' : 'Трейлер (англ.)',
+            onSelect: function () {
+                playTrailer(videos, function () { show(entry, mode); });
+            }
+        }];
 
         Lampa.Modal.open({
             title: 'Фильм на вечер · ' + (mode.type === 'custom' ? describeFilter(mode.filter) || 'Без фильтров' : MODE_TITLE[mode.type]),
@@ -846,7 +853,8 @@
                         Lampa.Modal.close();
                         Lampa.Activity.push({ url: '', component: 'full', id: card.id, method: 'movie', card: card, source: 'tmdb' });
                     }
-                },
+                }
+            ].concat(trailerButton, [
                 {
                     name: 'Другой',
                     onSelect: function () {
@@ -870,8 +878,37 @@
                         pick(mode);
                     }
                 }
-            ]
+            ])
         });
+    }
+
+    // YouTube-трейлеры: сначала на языке интерфейса, потом английские; трейлеры раньше тизеров
+    function trailers(details) {
+        var list = ((details.videos && details.videos.results) || []).filter(function (v) {
+            return v.site === 'YouTube' && v.key && (v.type === 'Trailer' || v.type === 'Teaser');
+        });
+        function weight(v) {
+            return (v.iso_639_1 === lang() ? 100 : 0) + (v.type === 'Trailer' ? 10 : 0) + (v.official ? 1 : 0);
+        }
+        return list.sort(function (a, b) {
+            return weight(b) - weight(a) || String(b.published_at).localeCompare(String(a.published_at));
+        });
+    }
+
+    // onClose — вернуть окно с фильмом после закрытия плеера
+    function playTrailer(videos, onClose) {
+        var first = videos[0];
+        if (Lampa.Platform && Lampa.Platform.is('android') && Lampa.Storage.field('player_launch_trailers') === 'youtube' && Lampa.Android) {
+            Lampa.Android.openYoutube(first.key);
+            return;
+        }
+        var items = videos.map(function (v) {
+            return { title: v.name, url: 'https://www.youtube.com/watch?v=' + v.key, id: v.key, youtube: true };
+        });
+        Lampa.Modal.close();
+        Lampa.Player.play(items[0]);
+        Lampa.Player.playlist(items);
+        if (Lampa.Player.callback) Lampa.Player.callback(onClose);
     }
 
     // Спросить оценку: понравился / нет / просто просмотрен
