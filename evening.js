@@ -19,11 +19,19 @@
     var network = new Lampa.Reguest();
 
     // ---------- хранилище ----------
+    //
+    // evening_movie_items — оценки: {id: {id, title, year, genres, status, time}}.
+    //   Синхронизируется через аккаунт CUB (нужен CUB Premium). Сброс оценки не удаляет
+    //   запись, а ставит status: '' — удаления Lampa между устройствами передаёт ненадёжно.
+    // evening_movie_db — только локальное: пропущенные фильмы и «как вам фильм?».
+    // Кроме того, оценки дублируются в родные закладки Lampa — они синхронизируются бесплатно.
+
+    var ITEMS_KEY = 'evening_movie_items';
+    var UPLOADED_KEY = 'evening_movie_uploaded';
 
     function db() {
         var data = Lampa.Storage.get(DB_KEY, '{}');
         if (!data || typeof data !== 'object') data = {};
-        data.items = data.items || {};     // id -> {status: liked|disliked|watched, ...}
         data.skipped = data.skipped || {}; // id -> timestamp
         return data;
     }
@@ -32,27 +40,117 @@
         Lampa.Storage.set(DB_KEY, data);
     }
 
+    function ratings() {
+        var items = Lampa.Storage.get(ITEMS_KEY, '{}');
+        return items && typeof items === 'object' && !Array.isArray(items) ? items : {};
+    }
+
+    function rated(items, id) {
+        return items[id] && items[id].status ? items[id] : null;
+    }
+
     function setStatus(movie, status) {
+        var items = ratings();
+        items[movie.id] = {
+            id: movie.id,
+            title: movie.title || movie.name,
+            year: (movie.release_date || '').slice(0, 4),
+            genres: genreIds(movie),
+            status: status || '',
+            time: Date.now()
+        };
+        Lampa.Storage.set(ITEMS_KEY, items);
+
         var data = db();
-        if (status) {
-            data.items[movie.id] = {
-                id: movie.id,
-                title: movie.title || movie.name,
-                year: (movie.release_date || '').slice(0, 4),
-                genres: genreIds(movie),
-                status: status,
-                time: Date.now()
-            };
-        } else {
-            delete data.items[movie.id];
+        if (data.pending && data.pending.id == movie.id) {
+            delete data.pending;
+            saveDb(data);
         }
-        if (data.pending && data.pending.id == movie.id) delete data.pending;
+
+        applyNativeMarks(movie, status);
+    }
+
+    // Оценка плагина, а если её нет — родные отметки Lampa (могли прийти с другого устройства)
+    function getStatus(card) {
+        var item = rated(ratings(), card.id);
+        if (item) return item.status;
+        var marks = lampaMarks(card);
+        if (marks.like) return 'liked';
+        if (marks.thrown) return 'disliked';
+        if (marks.viewed) return 'watched';
+        return '';
+    }
+
+    // Родные закладки: понравился → «Нравится» + «Просмотрено», просмотрен → «Просмотрено»,
+    // не понравился → «Брошено». «Просмотрено» и «Брошено» в Lampa взаимоисключающие.
+    function applyNativeMarks(movie, status) {
+        try {
+            var card = nativeCard(movie);
+            var marks = lampaMarks(card);
+            var mark = status === 'disliked' ? 'thrown' : status ? 'viewed' : '';
+            var like = status === 'liked';
+
+            if (like && !marks.like) Lampa.Favorite.add('like', card);
+            if (!like && marks.like) Lampa.Favorite.remove('like', card);
+
+            ['look', 'viewed', 'scheduled', 'continued', 'thrown'].forEach(function (m) {
+                if (marks[m] && m !== mark && (mark || m === 'viewed' || m === 'thrown')) Lampa.Favorite.remove(m, card);
+            });
+            if (mark && !marks[mark]) Lampa.Favorite.add(mark, card);
+        } catch (e) {
+            console.log('Evening movie', 'native marks', e.message);
+        }
+    }
+
+    // Карточка в том виде, в каком её хранит Lampa в закладках
+    function nativeCard(movie) {
+        var card = {};
+        ['id', 'title', 'original_title', 'poster_path', 'backdrop_path', 'release_date', 'vote_average', 'overview', 'original_language']
+            .forEach(function (k) { if (movie[k] !== undefined) card[k] = movie[k]; });
+        card.genre_ids = genreIds(movie);
+        card.source = 'tmdb';
+        return card;
+    }
+
+    // Перенос оценок из первой версии плагина (лежали внутри evening_movie_db)
+    function migrate() {
+        var data = Lampa.Storage.get(DB_KEY, '{}');
+        if (!data || !data.items) return;
+        var items = ratings();
+        Object.keys(data.items).forEach(function (id) {
+            if (!items[id]) items[id] = data.items[id];
+        });
+        delete data.items;
+        Lampa.Storage.set(ITEMS_KEY, items);
         saveDb(data);
     }
 
-    function getStatus(id) {
-        var item = db().items[id];
-        return item ? item.status : '';
+    // Синхронизация через CUB. Lampa отправляет на сервер только записи, изменённые после
+    // загрузки данных с сервера, поэтому старые локальные оценки один раз «освежаем»
+    // небольшими порциями (у Lampa ограничение — 5 отправок за 2 секунды).
+    function enableSync() {
+        if (!Lampa.Storage.sync) return;
+        Lampa.Storage.sync(ITEMS_KEY, 'object_object');
+
+        Lampa.Listener.follow('worker_storage', function (e) {
+            if (e.type !== 'insert' || e.name !== ITEMS_KEY) return;
+            if (Lampa.Storage.get(UPLOADED_KEY, false)) return;
+
+            var server = e.from || {};
+            var queue = Object.keys(ratings()).filter(function (id) { return !server[id]; });
+
+            function next() {
+                if (!queue.length) return Lampa.Storage.set(UPLOADED_KEY, true);
+                var items = ratings();
+                queue.splice(0, 4).forEach(function (id) {
+                    if (items[id]) items[id].time = Date.now();
+                });
+                Lampa.Storage.set(ITEMS_KEY, items);
+                setTimeout(next, 2500);
+            }
+
+            setTimeout(next, 1000);
+        });
     }
 
     function genreIds(movie) {
@@ -149,6 +247,11 @@
                     onSelect: function (item) {
                         if (item.reset) {
                             saveDb({});
+                            var items = ratings();
+                            Object.keys(items).forEach(function (id) {
+                                if (items[id].status) { applyNativeMarks(items[id], ''); items[id] = { id: items[id].id, title: items[id].title, status: '', time: Date.now() }; }
+                            });
+                            Lampa.Storage.set(ITEMS_KEY, items);
                             Lampa.Noty.show('История очищена');
                         }
                         Lampa.Controller.toggle('settings_component');
@@ -201,8 +304,23 @@
         }
     }
 
+    var MARK_TYPES = ['like', 'look', 'viewed', 'scheduled', 'continued', 'thrown'];
+
+    // Отметки карточки; при входе в CUB они лежат в облачных закладках, а не в Favorite
     function lampaMarks(card) {
-        try { return Lampa.Favorite.check(card) || {}; } catch (e) { return {}; }
+        try {
+            var account = Lampa.Account;
+            if (account && account.Permit && account.Permit.sync && account.Bookmarks && account.Bookmarks.find) {
+                var result = {};
+                MARK_TYPES.forEach(function (type) {
+                    result[type] = Boolean(account.Bookmarks.find({ type: type, id: card.id }));
+                });
+                return result;
+            }
+            return Lampa.Favorite.check(card) || {};
+        } catch (e) {
+            return {};
+        }
     }
 
     function lampaWatchedPercent(card) {
@@ -212,6 +330,7 @@
     // Профиль: веса жанров + фильмы-«семена» для рекомендаций
     function buildProfile() {
         var data = db();
+        var items = ratings();
         var weights = {};
         var liked = [];
         var seen = {};
@@ -220,8 +339,8 @@
             (genres || []).forEach(function (g) { weights[g] = (weights[g] || 0) + w; });
         }
 
-        Object.keys(data.items).forEach(function (id) {
-            var item = data.items[id];
+        Object.keys(items).forEach(function (id) {
+            var item = items[id];
             if (item.status === 'liked') { add(item.genres, 2); liked.push(item); }
             else if (item.status === 'disliked') add(item.genres, -2);
             else if (item.status === 'watched') add(item.genres, 0.3);
@@ -229,23 +348,23 @@
 
         // родные отметки Lampa тоже учитываем
         lampaList('like').forEach(function (card) {
-            if (!data.items[card.id]) { add(genreIds(card), 1.5); liked.push({ id: card.id, title: card.title }); }
+            if (!rated(items, card.id)) { add(genreIds(card), 1.5); liked.push({ id: card.id, title: card.title }); }
             seen[card.id] = true;
         });
         lampaList('viewed').forEach(function (card) {
-            if (!data.items[card.id]) add(genreIds(card), 0.3);
+            if (!rated(items, card.id)) add(genreIds(card), 0.3);
             seen[card.id] = true;
         });
         lampaList('thrown').forEach(function (card) {
-            if (!data.items[card.id]) add(genreIds(card), -1.5);
+            if (!rated(items, card.id)) add(genreIds(card), -1.5);
             seen[card.id] = true;
         });
 
-        return { weights: weights, liked: liked, seen: seen, data: data };
+        return { weights: weights, liked: liked, seen: seen, data: data, items: items };
     }
 
     function excluded(movie, profile) {
-        if (profile.data.items[movie.id] || profile.seen[movie.id]) return true;
+        if (rated(profile.items, movie.id) || profile.seen[movie.id]) return true;
         var skipped = profile.data.skipped[movie.id];
         if (skipped && Date.now() - skipped < SKIP_DAYS * DAY) return true;
         var marks = lampaMarks(movie);
@@ -722,7 +841,7 @@
                     name: 'Смотреть',
                     onSelect: function () {
                         var data = db();
-                        data.pending = { id: card.id, title: card.title, release_date: card.release_date, genre_ids: genreIds(card), time: Date.now() };
+                        data.pending = $.extend(nativeCard(card), { time: Date.now() });
                         saveDb(data);
                         Lampa.Modal.close();
                         Lampa.Activity.push({ url: '', component: 'full', id: card.id, method: 'movie', card: card, source: 'tmdb' });
@@ -757,7 +876,7 @@
 
     // Спросить оценку: понравился / нет / просто просмотрен
     function rate(card, after, cancel, title) {
-        var current = getStatus(card.id);
+        var current = getStatus(card);
         var items = [
             { title: 'Понравился', status: 'liked' },
             { title: 'Не понравился', status: 'disliked' },
@@ -826,7 +945,7 @@
         );
 
         function update() {
-            var status = getStatus(movie.id);
+            var status = getStatus(movie);
             button.find('span').text(STATUS_TEXT[status] || 'Оценить');
         }
 
@@ -876,6 +995,8 @@
     }
 
     function start() {
+        migrate();
+        enableSync();
         addStyles();
         addMenu();
         addSettings();
