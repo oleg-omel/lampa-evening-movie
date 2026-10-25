@@ -1026,15 +1026,32 @@
 
     var ICON = '<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M16 3.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6.6-1.4Z" fill="currentColor"/></svg>';
 
+    var MENU_TITLE = 'Фильм на вечер';
+
     function addMenu() {
-        var item = $(
-            '<li class="menu__item selector" data-action="evening_movie">' +
-                '<div class="menu__ico">' + ICON + '</div>' +
-                '<div class="menu__text">Фильм на вечер</div>' +
-            '</li>'
-        );
-        item.on('hover:enter', openModes);
-        $('.menu .menu__list').eq(0).append(item);
+        // Lampa запоминает порядок меню (menu_sort) и ставит неизвестные пункты в конец.
+        // При первой установке ставим наш пункт сразу после первого («Главная»);
+        // если пользователь потом передвинет его сам — порядок уже сохранён и мы его не трогаем.
+        var sort = Lampa.Storage.get('menu_sort', '[]');
+        if (Array.isArray(sort) && sort.length && sort.indexOf(MENU_TITLE) < 0) {
+            sort.splice(1, 0, MENU_TITLE);
+            Lampa.Storage.set('menu_sort', sort);
+        }
+
+        var item;
+        if (Lampa.Menu && Lampa.Menu.addButton) {
+            item = Lampa.Menu.addButton(ICON, MENU_TITLE, openModes);
+        } else {
+            var list = $('.menu .menu__list').eq(0);
+            if (!list.length) return setTimeout(addMenu, 1000); // меню ещё не построено
+            item = $('<li class="menu__item selector"><div class="menu__ico">' + ICON + '</div><div class="menu__text">' + MENU_TITLE + '</div></li>');
+            item.on('hover:enter', openModes);
+            list.append(item);
+        }
+        item.attr('data-action', 'evening_movie');
+
+        var first = item.parent().children('.menu__item').first();
+        if (first.length && first[0] !== item[0]) item.insertAfter(first);
     }
 
     function addStyles() {
