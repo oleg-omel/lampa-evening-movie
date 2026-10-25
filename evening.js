@@ -167,7 +167,7 @@
 
     function prefs() {
         return {
-            min_rating: parseFloat(setting('evening_min_rating', '7')),
+            min_rating: parseFloat(setting('evening_min_rating', '6.5')),
             min_votes: parseInt(setting('evening_min_votes', '500'), 10),
             min_year: parseInt(setting('evening_min_year', '1980'), 10),
             exclude_genres: setting('evening_exclude_genres', true) !== false && setting('evening_exclude_genres', true) !== 'false',
@@ -191,7 +191,7 @@
                 name: 'evening_min_rating',
                 type: 'select',
                 values: { '6.5': '6.5+', '7': '7.0+', '7.5': '7.5+', '8': '8.0+' },
-                default: '7'
+                default: '6.5'
             },
             field: { name: 'Минимальный рейтинг TMDB', description: 'Фильмы ниже не предлагаются' }
         });
