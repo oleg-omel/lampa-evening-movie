@@ -881,7 +881,26 @@
             ])
         });
 
-        $('.modal').last().addClass('evening-modal');
+        var modal = $('.modal').last().addClass('evening-modal');
+        modal.find('.modal__button').each(function (i) {
+            $(this).prepend('<span class="evening-key">' + (i + 1) + '</span>');
+        });
+    }
+
+    // Цифры на пульте нажимают кнопки окна: 1 — первая, 2 — вторая и т.д.
+    function bindDigitKeys() {
+        if (!Lampa.Keypad || !Lampa.Keypad.listener) return;
+        Lampa.Keypad.listener.follow('keydown', function (e) {
+            var code = e.code;
+            var digit = code >= 49 && code <= 57 ? code - 48 : code >= 97 && code <= 105 ? code - 96 : 0;
+            if (!digit) return;
+
+            var modal = $('.evening-modal').last();
+            if (!modal.length || modal.hasClass('hide') || Lampa.Controller.enabled().name !== 'modal') return;
+
+            var button = modal.find('.modal__button').eq(digit - 1);
+            if (button.length) button.trigger('hover:enter');
+        });
     }
 
     // YouTube-трейлеры: сначала на языке интерфейса, потом английские; трейлеры раньше тизеров
@@ -1031,6 +1050,7 @@
             '.evening-rate svg{width:1.6em;height:1.6em}' +
             '.evening-modal .modal__footer{flex-wrap:wrap;row-gap:.6em}' +
             '.evening-modal .modal__button{white-space:nowrap;padding-left:.9em;padding-right:.9em}' +
+            '.evening-key{display:inline-block;min-width:1.3em;margin-right:.45em;padding:0 .25em;border:1px solid currentColor;border-radius:.3em;font-size:.8em;line-height:1.3em;text-align:center;opacity:.7}' +
             '@media (max-width:600px){.evening-movie{flex-direction:column}.evening-movie__poster{flex-basis:auto;width:9em}}' +
             '</style>');
     }
@@ -1038,6 +1058,7 @@
     function start() {
         migrate();
         enableSync();
+        bindDigitKeys();
         addStyles();
         addMenu();
         addSettings();
