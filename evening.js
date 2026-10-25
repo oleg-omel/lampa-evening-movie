@@ -1030,12 +1030,14 @@
 
     function addMenu() {
         // Lampa запоминает порядок меню (menu_sort) и ставит неизвестные пункты в конец.
-        // При первой установке ставим наш пункт сразу после первого («Главная»);
-        // если пользователь потом передвинет его сам — порядок уже сохранён и мы его не трогаем.
+        // Один раз ставим наш пункт сразу после первого («Главная»), в том числе если раньше
+        // он уже попал в конец списка; дальше порядок, выбранный пользователем, не трогаем.
         var sort = Lampa.Storage.get('menu_sort', '[]');
-        if (Array.isArray(sort) && sort.length && sort.indexOf(MENU_TITLE) < 0) {
+        if (!Lampa.Storage.get('evening_menu_placed', false) && Array.isArray(sort) && sort.length) {
+            sort = sort.filter(function (name) { return name !== MENU_TITLE; });
             sort.splice(1, 0, MENU_TITLE);
             Lampa.Storage.set('menu_sort', sort);
+            Lampa.Storage.set('evening_menu_placed', true);
         }
 
         var item;
