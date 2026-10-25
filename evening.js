@@ -1051,8 +1051,9 @@
             '.evening-movie__overview{margin-top:1em;line-height:1.5;opacity:.9}' +
             '.evening-rate svg{width:1.6em;height:1.6em}' +
             '.evening-modal .modal__footer{flex-wrap:wrap;row-gap:.6em}' +
-            '.evening-modal .modal__button{white-space:nowrap;padding-left:.9em;padding-right:.9em}' +
-            '.evening-key{display:inline-block;min-width:1.3em;margin-right:.45em;padding:0 .25em;border:1px solid currentColor;border-radius:.3em;font-size:.8em;line-height:1.3em;text-align:center;opacity:.7}' +
+            '.evening-modal .modal__content{width:62em;max-width:90%}' +
+            '.evening-modal .modal__button{white-space:nowrap;padding-left:.75em;padding-right:.75em}' +
+            '.evening-key{display:inline-block;min-width:1.3em;margin-right:.35em;padding:0 .25em;border:1px solid currentColor;border-radius:.3em;font-size:.8em;line-height:1.3em;text-align:center;opacity:.7}' +
             '@media (max-width:600px){.evening-movie{flex-direction:column}.evening-movie__poster{flex-basis:auto;width:9em}}' +
             '</style>');
     }
