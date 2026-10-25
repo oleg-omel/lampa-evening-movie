@@ -304,7 +304,7 @@
         }
     }
 
-    var MARK_TYPES = ['like', 'look', 'viewed', 'scheduled', 'continued', 'thrown'];
+    var MARK_TYPES = ['like', 'wath', 'look', 'viewed', 'scheduled', 'continued', 'thrown'];
 
     // Отметки карточки; при входе в CUB они лежат в облачных закладках, а не в Favorite
     function lampaMarks(card) {
@@ -368,7 +368,7 @@
         var skipped = profile.data.skipped[movie.id];
         if (skipped && Date.now() - skipped < SKIP_DAYS * DAY) return true;
         var marks = lampaMarks(movie);
-        if (marks.viewed || marks.thrown) return true;
+        if (marks.viewed || marks.thrown || marks.wath) return true; // «Позже» уже отложен
         if (lampaWatchedPercent(movie) >= 70) return true;
         return false;
     }
@@ -660,6 +660,8 @@
     // ---------- главное окно ----------
 
     var busy = false;
+    var current = null;  // фильм, показанный сейчас: {entry, mode}
+    var history = [];    // ранее показанные за этот раз — для кнопки «Назад»
     var FILTER_KEY = 'evening_movie_filter';
 
     function savedFilter() {
@@ -670,6 +672,8 @@
     // Первый экран: выбор режима
     function openModes() {
         if (busy) return;
+        current = null;
+        history = [];
 
         var data = db();
         if (data.pending && Date.now() - data.pending.time > 60 * 60 * 1000) {
@@ -776,7 +780,7 @@
                     }
                     return;
                 }
-                show(entry, mode);
+                present(entry, mode);
             });
         });
     }
@@ -803,6 +807,30 @@
     }
 
     var MODE_TITLE = { taste: 'По вашему вкусу', random: 'Случайный фильм' };
+
+    // Показать новый фильм, запомнив предыдущий для «Назад»
+    function present(entry, mode) {
+        if (current) history.push(current);
+        if (history.length > 30) history.shift();
+        current = { entry: entry, mode: mode };
+        show(entry, mode);
+    }
+
+    function goBack() {
+        Lampa.Modal.close();
+        var prev = history.pop();
+        if (!prev) {
+            current = null;
+            return openModes();
+        }
+        var data = db(); // вернулись к пропущенному — больше не считаем его пропущенным
+        if (data.skipped[prev.entry.movie.id]) {
+            delete data.skipped[prev.entry.movie.id];
+            saveDb(data);
+        }
+        current = prev;
+        show(prev.entry, prev.mode);
+    }
 
     function show(entry, mode) {
         var d = entry.details;
@@ -879,6 +907,23 @@
                         Lampa.Modal.close();
                         pick(mode);
                     }
+                },
+                {
+                    name: 'Позже',
+                    onSelect: function () {
+                        try {
+                            if (!lampaMarks(card).wath) Lampa.Favorite.add('wath', nativeCard(card));
+                            Lampa.Noty.show('Добавлено в закладки «Позже»');
+                        } catch (e) {
+                            Lampa.Noty.show('Не получилось добавить в «Позже»');
+                        }
+                        Lampa.Modal.close();
+                        pick(mode);
+                    }
+                },
+                {
+                    name: 'Назад',
+                    onSelect: goBack
                 }
             ])
         });
@@ -1067,7 +1112,7 @@
             '.evening-movie__meta{display:flex;flex-wrap:wrap;gap:.4em 1em;margin-top:.8em;opacity:.85}' +
             '.evening-movie__rating{color:#ffd54a;font-weight:600}' +
             '.evening-movie__reason{display:inline-block;margin-top:.8em;padding:.25em .7em;border-radius:1em;background:rgba(255,255,255,.12);font-size:.9em}' +
-            '.evening-movie__overview{margin-top:1em;line-height:1.5;opacity:.9}' +
+            '.evening-movie__overview{margin-top:1em;font-size:1.2em;line-height:1.5;opacity:.9}' +
             '.evening-rate svg{width:1.6em;height:1.6em}' +
             '.evening-modal .modal__footer{flex-wrap:wrap;row-gap:.6em}' +
             '.evening-modal .modal__content{width:62em;max-width:90%}' +
