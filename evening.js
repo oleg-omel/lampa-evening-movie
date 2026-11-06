@@ -407,7 +407,7 @@
     }
 
     function decadeName(year) {
-        return year >= 2000 ? year + '-е' : String(year).slice(2) + '-е';
+        return 'С ' + year;
     }
 
     function describeFilter(f) {
@@ -428,7 +428,7 @@
 
         return {
             from: f.decade ? Math.max(f.decade, 1900) : p.min_year,
-            to: f.decade ? f.decade + 9 : 0,
+            to: f.decade ? new Date().getFullYear() : 0,
             genre: genre,                          // обязательный жанр
             any: mood && !genre ? mood.genres : [], // хотя бы один из жанров настроения
             boost: mood ? mood.genres : [],         // жанры настроения поднимают в рейтинге
@@ -479,7 +479,7 @@
             'vote_average.gte': c.min_rating,
             'vote_count.gte': p.min_votes,
             'primary_release_date.gte': c.from + '-01-01',
-            'primary_release_date.lte': c.to && c.to < new Date().getFullYear() ? c.to + '-12-31' : dateShift(DIGITAL_DELAY_DAYS),
+            'primary_release_date.lte': c.to ? (c.to < new Date().getFullYear() ? c.to + '-12-31' : dateShift(0)) : dateShift(DIGITAL_DELAY_DAYS),
             with_release_type: '4|5', // есть цифровой или физический релиз
             include_adult: 'false',
             page: 1
@@ -687,7 +687,7 @@
             items: [
                 { title: 'По моему вкусу', subtitle: 'С учётом ваших оценок', mode: { type: 'taste' } },
                 { title: 'Случайный фильм', subtitle: 'Любой хороший фильм, без учёта вкуса', mode: { type: 'random' } },
-                { title: 'Настроение, жанр, десятилетие', subtitle: filter ? 'В прошлый раз: ' + filter : 'Указать, чего хочется', filters: true }
+                { title: 'Настроение, жанр, год выпуска', subtitle: filter ? 'В прошлый раз: ' + filter : 'Указать, чего хочется', filters: true }
             ],
             onSelect: function (item) {
                 if (item.filters) openFilters(savedFilter());
@@ -726,7 +726,7 @@
         var items = [
             { title: 'Настроение', subtitle: mood ? mood.title : 'Любое', action: 'mood' },
             { title: 'Жанр', subtitle: f.genre ? genreName(f.genre) : 'Любой', action: 'genre' },
-            { title: 'Десятилетие', subtitle: f.decade ? decadeName(f.decade) : 'Любое', action: 'decade' }
+            { title: 'Год выпуска', subtitle: f.decade ? decadeName(f.decade) : 'Любой', action: 'decade' }
         ];
         if (describeFilter(f)) items.push({ title: 'Сбросить фильтры', action: 'reset' });
         items.push({ title: 'Подобрать фильм', subtitle: describeFilter(f) || 'Без ограничений', action: 'go' });
@@ -740,7 +740,7 @@
                 } else if (item.action === 'genre') {
                     chooseOption('Жанр', [{ title: 'Любой' }].concat(GENRES.map(function (g) { return { title: g[1], value: g[0] }; })), f.genre, set('genre'), reopen);
                 } else if (item.action === 'decade') {
-                    chooseOption('Десятилетие', [{ title: 'Любое' }].concat(DECADES.map(function (d) { return { title: decadeName(d), value: d }; }).reverse()), f.decade, set('decade'), reopen);
+                    chooseOption('Год выпуска', [{ title: 'Любой' }].concat(DECADES.map(function (d) { return { title: decadeName(d), value: d }; }).reverse()), f.decade, set('decade'), reopen);
                 } else if (item.action === 'reset') {
                     f = {};
                     Lampa.Storage.set(FILTER_KEY, f);
